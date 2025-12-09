@@ -1,0 +1,11 @@
+[user]
+	name = ogas
+	email = 2970143166zsbd@gmail.com
+[tcp]
+  v4 = true
+[http]
+	version = HTTP/1.1
+[credential]
+	helper = /usr/lib/git-core/git-credential-libsecret
+[init]
+	defaultBranch = main

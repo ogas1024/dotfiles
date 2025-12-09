@@ -1,0 +1,7 @@
+[tools]
+java = "17"
+maven = "latest"
+node = "lts"
+pnpm = "latest"
+python = "3.13"
+uv = "latest"

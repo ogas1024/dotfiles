@@ -1,0 +1,14 @@
+.config/zsh/env.d/90-secrets.zsh
+.config/zsh/secrets.zsh
+.config/zsh/secrets.d/
+.config/zsh/.zcompdump*
+
+# Backups
+*.bak
+*.backup
+*.old
+*.new
+*.swp
+
+# Yazi conflict files
+*.toml-*

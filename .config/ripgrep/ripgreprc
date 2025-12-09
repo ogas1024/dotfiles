@@ -1,0 +1,10 @@
+# ripgrep 配置文件（RIPGREP_CONFIG_PATH 指向此处）
+#
+# 默认不启用任何选项，避免改变现有行为。
+# 如需修改默认行为，可取消注释：
+#
+# --hidden                 # 搜索隐藏文件
+# --glob '!{.git,node_modules,target,build,dist}'
+# --max-columns 200        # 截断超长行的预览
+# --colors 'match:fg:196'  # 匹配着色
+

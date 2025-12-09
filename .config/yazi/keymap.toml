@@ -1,0 +1,13 @@
+[[mgr.prepend_keymap]]
+# 按 'q' 键时：
+on = [ "q" ]
+# 执行 "退出并写入 CWD" 命令
+# 这会让你的 shell 脚本检测到路径并 cd
+run = "quit --write-cwd"
+
+[[mgr.prepend_keymap]]
+# 按 'Q' (Shift+q) 键时：
+on = [ "Q" ]
+# 执行 "常规退出" 命令
+# 这不会写入 CWD，你的 shell 目录将保持不变
+run = "quit"
