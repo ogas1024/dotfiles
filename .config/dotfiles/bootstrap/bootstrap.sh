@@ -51,9 +51,26 @@ if [ "${BOOTSTRAP_STAGE:-0}" != "1" ] && [ ! -d "$SCRIPT_DIR/steps" ]; then
   exit 0
 fi
 
+# 总是从 TTY 读取输入，避免 curl | bash 时 stdin 为空导致死循环
+read_tty() {
+  local __prompt="$1" __out="$2" __buf="" __status=0
+  if [ -t 0 ]; then
+    read -r -p "$__prompt" __buf; __status=$?
+  elif [ -r /dev/tty ]; then
+    read -r -p "$__prompt" __buf </dev/tty; __status=$?
+  else
+    return 1
+  fi
+  printf -v "$__out" '%s' "$__buf"
+  return "$__status"
+}
+
 prompt_var() {
   local var="$1" default="$2" val
-  read -r -p "$var [$default]: " val
+  if ! read_tty "$var [$default]: " val; then
+    echo "[bootstrap] 无法交互读取 $var，使用默认值 $default"
+    val="$default"
+  fi
   if [ -z "$val" ]; then val="$default"; fi
   export "$var=$val"
 }
@@ -181,7 +198,10 @@ confirm_and_run() {
   local step="$1" ans
   step_info "$step"
   while true; do
-    read -r -p "[step: $step] y=执行 / s=跳过 / e=退出 ? " ans
+    if ! read_tty "[step: $step] y=执行 / s=跳过 / e=退出 ? " ans; then
+      echo "[bootstrap] 无法读取输入，请在交互式终端运行（例如 docker run -it ... 或在本地直接 bash 运行）。"
+      exit 1
+    fi
     case "$ans" in
     y | Y)
       run_step "$step"
