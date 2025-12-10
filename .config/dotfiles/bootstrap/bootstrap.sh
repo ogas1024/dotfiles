@@ -14,7 +14,13 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 兼容 curl | bash：BASH_SOURCE 可能为空
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+if [ -z "$SCRIPT_PATH" ] || [ "$SCRIPT_PATH" = "-" ]; then
+  SCRIPT_DIR="$(pwd)"
+else
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+fi
 
 # ---- 自举逻辑：如果 steps 不存在，裸克隆 + 打包后重新执行自己 ----
 if [ "${BOOTSTRAP_STAGE:-0}" != "1" ] && [ ! -d "$SCRIPT_DIR/steps" ]; then
