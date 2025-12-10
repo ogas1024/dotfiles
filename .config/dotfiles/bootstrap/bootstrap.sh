@@ -1,225 +1,347 @@
 #!/usr/bin/env bash
-# 顶层调度器（交互式、多步骤、可选择性执行；支持 curl 直接运行）
-# 特性：
-#   - 如当前目录缺少 steps/，自动裸克隆 REPO 到 DOTDIR，打包 bootstrap 到临时目录再自举，无需额外 stage0；
-#   - 启动时逐项询问关键变量（带默认值）并 export，避免全局耦合；
-#   - 自动检测发行版（pacman/apt）并调用对应步骤脚本；
-#   - 每一步前给出“将做什么 / 完成后需手动什么”的中文提示，再询问 y=执行 / s=跳过 / e=退出；
-#   - 默认步骤：packages dotfiles secrets shell plugins mihomo fcitx5 fonts，可通过 STEPS 调整。
+# ============================================================================
+# Dotfiles Bootstrap - 一键配置你的开发环境
+# ============================================================================
+#
 # 用法：
-#   # 如果已经在仓库工作树内：
-#   bash ~/.config/dotfiles/bootstrap/bootstrap.sh
-#   # 如果想 curl 直接跑（单文件入口）：
-#   curl -fsSL https://raw.githubusercontent.com/<you>/<dotfiles>/main/.config/dotfiles/bootstrap/bootstrap.sh | bash
+#   交互式安装：
+#     bash bootstrap.sh
+#
+#   非交互式安装（使用默认值）：
+#     bash bootstrap.sh --yes
+#
+#   curl 直接运行：
+#     bash <(curl -fsSL https://raw.githubusercontent.com/ogas1024/dotfiles/main/.config/dotfiles/bootstrap/bootstrap.sh)
+#
+# 环境变量配置（可选）：
+#   REPO=          Git 仓库地址（默认：git@github.com:ogas1024/dotfiles.git）
+#   DOTDIR=        裸仓库位置（默认：$HOME/.dotfiles）
+#   NON_INTERACTIVE=1  非交互模式
+#
+# ============================================================================
 
 set -euo pipefail
 
-# 兼容 curl | bash：BASH_SOURCE 可能为空
-SCRIPT_PATH="${BASH_SOURCE[0]:-}"
-if [ -z "$SCRIPT_PATH" ] || [ "$SCRIPT_PATH" = "-" ]; then
-  SCRIPT_DIR="$(pwd)"
-else
-  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ---- 自举逻辑：如果 steps 不存在，裸克隆 + 打包后重新执行自己 ----
+# ============================================================================
+# 自举逻辑：如果 steps/ 不存在，先克隆仓库
+# ============================================================================
 if [ "${BOOTSTRAP_STAGE:-0}" != "1" ] && [ ! -d "$SCRIPT_DIR/steps" ]; then
-  REPO="${REPO:-https://github.com/ogas1024/dotfiles.git}"
+  echo "🔍 检测到首次运行，正在克隆 dotfiles 仓库..."
+
+  REPO="${REPO:-git@github.com:ogas1024/dotfiles.git}"
   BRANCH="${BRANCH:-main}"
   DOTDIR="${DOTDIR:-$HOME/.dotfiles}"
-  TMP_BASE="${TMPDIR:-/tmp}"
-  TMP_DIR="$(mktemp -d "${TMP_BASE%/}/dotfiles-bootstrap-XXXXXX")"
-  echo "[bootstrap] steps 不存在，进行自举：裸克隆 $REPO ($BRANCH) -> $DOTDIR"
+  TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-bootstrap-XXXXXX")"
+
+  # 安装 git（如果需要）
   if ! command -v git >/dev/null 2>&1; then
-    echo "[bootstrap] 未检测到 git，尝试安装..."
+    echo "📦 正在安装 git..."
     if command -v pacman >/dev/null 2>&1; then
       sudo pacman -Sy --noconfirm git
     elif command -v apt-get >/dev/null 2>&1; then
       sudo apt-get update -y && sudo apt-get install -y git
     else
-      echo "[bootstrap] 无法安装 git（未检测到 pacman/apt-get），请手动安装后重试。" >&2
+      echo "❌ 无法安装 git，请手动安装后重试" >&2
       exit 1
     fi
   fi
+
+  # 克隆裸仓库
+  echo "📥 克隆仓库：$REPO ($BRANCH)"
   rm -rf "$DOTDIR"
   git clone --bare --branch "$BRANCH" "$REPO" "$DOTDIR"
-  echo "[bootstrap] 打包 bootstrap 目录到临时目录 $TMP_DIR"
+
+  # 提取 bootstrap 目录
+  echo "📦 准备安装脚本..."
   git --git-dir="$DOTDIR" archive "$BRANCH" .config/dotfiles/bootstrap | tar -x -C "$TMP_DIR"
-  echo "[bootstrap] 重新执行自身（携带 BOOTSTRAP_STAGE=1）"
-  BOOTSTRAP_STAGE=1 DOTDIR="$DOTDIR" REPO="$REPO" BRANCH="$BRANCH" bash "$TMP_DIR/.config/dotfiles/bootstrap/bootstrap.sh"
+
+  # 重新执行自身
+  echo "🚀 启动安装程序..."
+  echo ""
+  BOOTSTRAP_STAGE=1 DOTDIR="$DOTDIR" REPO="$REPO" BRANCH="$BRANCH" \
+    bash "$TMP_DIR/.config/dotfiles/bootstrap/bootstrap.sh" "$@"
+
   rm -rf "$TMP_DIR"
   exit 0
 fi
 
-# 总是从 TTY 读取输入，避免 curl | bash 时 stdin 为空导致死循环
-read_tty() {
-  local __prompt="$1" __out="$2" __buf="" __status=0
-  if [ -t 0 ]; then
-    read -r -p "$__prompt" __buf; __status=$?
-  elif [ -r /dev/tty ]; then
-    read -r -p "$__prompt" __buf </dev/tty; __status=$?
-  else
-    return 1
-  fi
-  printf -v "$__out" '%s' "$__buf"
-  return "$__status"
-}
+# ============================================================================
+# 加载依赖
+# ============================================================================
+source "$SCRIPT_DIR/lib/common.sh"
 
-prompt_var() {
-  local var="$1" default="$2" val
-  if ! read_tty "$var [$default]: " val; then
-    echo "[bootstrap] 无法交互读取 $var，使用默认值 $default"
-    val="$default"
-  fi
-  if [ -z "$val" ]; then val="$default"; fi
-  export "$var=$val"
-}
+# ============================================================================
+# 命令行参数解析
+# ============================================================================
+NON_INTERACTIVE="${NON_INTERACTIVE:-0}"
 
-# ---- 交互式变量输入（带默认值；集中在此减少耦合） ----
-prompt_var REPO "${REPO:-git@github.com:ogas1024/dotfiles.git}"
-prompt_var DOTDIR "${DOTDIR:-$HOME/.dotfiles}"
-prompt_var ZDOTDIR "${ZDOTDIR:-${XDG_CONFIG_HOME:-$HOME/.config}/zsh}"
-prompt_var RUN_MIRRORS "${RUN_MIRRORS:-1}"
-prompt_var REFLECTOR_COUNTRY "${REFLECTOR_COUNTRY:-China}"
-prompt_var SET_DEFAULT_SHELL "${SET_DEFAULT_SHELL:-1}"
-prompt_var INSTALL_NVIM_PLUGINS "${INSTALL_NVIM_PLUGINS:-1}"
-prompt_var MIHOMO_SETUP "${MIHOMO_SETUP:-1}"
-prompt_var MIHOMO_CONFIG "${MIHOMO_CONFIG:-$HOME/.config/mihomo/config.yaml}"
-prompt_var MIHOMO_DOWNLOAD_GEODATA "${MIHOMO_DOWNLOAD_GEODATA:-1}"
-prompt_var MIHOMO_ENABLE_SERVICE "${MIHOMO_ENABLE_SERVICE:-1}"
-prompt_var MIHOMO_USER "${MIHOMO_USER:-mihomo}"
-prompt_var MIHOMO_GEO_BASE "${MIHOMO_GEO_BASE:-https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release}"
-prompt_var MIHOMO_TGZ_URL "${MIHOMO_TGZ_URL:-https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-amd64.tar.gz}"
-prompt_var FCITX5_SETUP "${FCITX5_SETUP:-1}"
-prompt_var STEPS "${STEPS:-packages dotfiles secrets shell plugins mihomo fcitx5 fonts}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -y|--yes|--non-interactive)
+      NON_INTERACTIVE=1
+      shift
+      ;;
+    -h|--help)
+      cat << 'EOF'
+Dotfiles Bootstrap - 一键配置你的开发环境
 
-# ---- 检测发行版（一次判定，后续步骤调用时不再重复判定） ----
+用法:
+  bash bootstrap.sh [选项]
+
+选项:
+  -y, --yes              非交互模式，使用默认配置
+  -h, --help             显示此帮助信息
+
+环境变量:
+  REPO                   Git 仓库地址
+  DOTDIR                 裸仓库位置（默认：~/.dotfiles）
+  MIHOMO_SETUP=1         启用 mihomo 安装
+  FCITX5_SETUP=1         启用 fcitx5 安装
+
+示例:
+  # 交互式安装
+  bash bootstrap.sh
+
+  # 非交互式安装
+  bash bootstrap.sh --yes
+
+  # 同时安装 mihomo 和 fcitx5
+  MIHOMO_SETUP=1 FCITX5_SETUP=1 bash bootstrap.sh --yes
+EOF
+      exit 0
+      ;;
+    *)
+      echo "未知参数：$1"
+      echo "使用 --help 查看帮助"
+      exit 1
+      ;;
+  esac
+done
+
+# ============================================================================
+# 欢迎界面
+# ============================================================================
+banner
+
+info "即将为你配置以下内容："
+echo ""
+echo "   ${ICON_PACKAGE} 系统软件包（zsh, tmux, nvim, starship 等）"
+echo "   ${ICON_GEAR} Dotfiles 配置文件（zsh, tmux, nvim 等）"
+echo "   ${ICON_PLUGIN} 插件管理器（zinit, TPM, LazyVim）"
+echo "   ${ICON_LOCK} 密钥文件模板"
+echo ""
+
+if [ "$MIHOMO_SETUP" = "1" ]; then
+  echo "   ${ICON_ROCKET} Mihomo 代理（可选，已启用）"
+fi
+
+if [ "$FCITX5_SETUP" = "1" ]; then
+  echo "   ${ICON_FONT} Fcitx5 输入法（可选，已启用）"
+fi
+
+echo ""
+separator
+
+# ============================================================================
+# 检测发行版
+# ============================================================================
 if command -v pacman >/dev/null 2>&1; then
   DISTRO="arch"
+  info "检测到发行版：Arch Linux / CachyOS"
 elif command -v apt-get >/dev/null 2>&1; then
   DISTRO="debian"
+  info "检测到发行版：Debian / Ubuntu"
 else
-  echo "Unsupported distro: neither pacman nor apt-get found." >&2
+  error "不支持的发行版（需要 pacman 或 apt-get）"
   exit 1
 fi
 
-# ---- 步骤执行路由 ----
-run_step() {
-  local step="$1"
-  case "$step" in
-  packages)
-    if [ "$DISTRO" = "arch" ]; then
-      bash "$SCRIPT_DIR/steps/pacman-packages.sh"
-    else
-      bash "$SCRIPT_DIR/steps/apt-packages.sh"
-    fi
-    ;;
-  dotfiles)
-    bash "$SCRIPT_DIR/steps/dotfiles-checkout.sh"
-    ;;
-  secrets)
-    bash "$SCRIPT_DIR/steps/secrets.sh"
-    ;;
-  shell)
-    bash "$SCRIPT_DIR/steps/shell-default.sh"
-    ;;
-  plugins)
-    bash "$SCRIPT_DIR/steps/plugins.sh"
-    ;;
-  mihomo)
-    if [ "$DISTRO" = "arch" ]; then
-      bash "$SCRIPT_DIR/steps/mihomo-pacman.sh"
-    else
-      bash "$SCRIPT_DIR/steps/mihomo-apt.sh"
-    fi
-    ;;
-  fcitx5)
-    if [ "$DISTRO" = "arch" ]; then
-      bash "$SCRIPT_DIR/steps/fcitx5-rime-pacman.sh"
-    else
-      bash "$SCRIPT_DIR/steps/fcitx5-rime-apt.sh"
-    fi
-    ;;
-  fonts)
-    if [ "$DISTRO" = "arch" ]; then
-      bash "$SCRIPT_DIR/steps/fonts-arch.sh"
-    else
-      bash "$SCRIPT_DIR/steps/fonts-apt.sh"
-    fi
-    ;;
-  *)
-    echo "Unknown step: $step" >&2
-    exit 1
-    ;;
-  esac
-}
+export DISTRO
 
-# ---- 步骤说明（执行前展示，便于用户决策） ----
-step_info() {
-  local step="$1"
-  case "$step" in
-  packages)
-    echo "即将执行：安装/升级系统与常用软件（含 paru 仅在 Arch）；可能耗时且需要网络。"
-    echo "完成后：无需额外动作。"
-    ;;
-  dotfiles)
-    echo "即将执行：裸仓库 checkout -f 覆盖本地同名文件，使用 REPO=$REPO。"
-    echo "完成后：如果有冲突或自定义文件会被覆盖，需自行备份。"
-    ;;
-  secrets)
-    echo "即将执行：创建 ~/.config/zsh/env.d/90-secrets.zsh（已忽略）。"
-    echo "完成后：手动编辑填入密钥，并 chmod 600（脚本已做）。"
-    ;;
-  shell)
-    echo "即将执行：chsh 将默认 shell 设置为 zsh（SET_DEFAULT_SHELL=$SET_DEFAULT_SHELL）。"
-    echo "完成后：重新登录后生效。"
-    ;;
-  plugins)
-    echo "即将执行：安装 TPM、触发 zinit、LazyVim 插件同步（INSTALL_NVIM_PLUGINS=$INSTALL_NVIM_PLUGINS）。"
-    echo "完成后：无手动步骤，首次 nvim 启动若有缺依赖需自行处理。"
-    ;;
-  mihomo)
-    echo "即将执行：原生 mihomo 部署（配置源：$MIHOMO_CONFIG，下载 geodata=$MIHOMO_DOWNLOAD_GEODATA，启动服务=$MIHOMO_ENABLE_SERVICE）。"
-    echo "完成后：如未在 $MIHOMO_CONFIG 填写订阅 URL/密钥，请先填写再运行本步骤；如已启动服务可用 systemctl status mihomo 查看。"
-    ;;
-  fcitx5)
-    echo "即将执行：安装/配置 fcitx5 + rime（含环境变量写入 /etc/environment，Arch 会装 rime-ice-git）。"
-    echo "完成后：需重新登录使环境变量生效；首次启动 Fcitx5 后在配置工具中添加 Rime，必要时运行 rime_deployer。"
-    ;;
-  fonts)
-    echo "即将执行：安装常用字体（Arch 用 paru 包含 AUR；Debian 用可用替代包）。"
-    echo "完成后：如需额外字体请手动放入 ~/.local/share/fonts 并运行 fc-cache -fv，商用字体自行准备。"
-    ;;
-  esac
-}
+echo ""
 
-# ---- 询问并执行单步 ----
-confirm_and_run() {
-  local step="$1" ans
-  step_info "$step"
-  while true; do
-    if ! read_tty "[step: $step] y=执行 / s=跳过 / e=退出 ? " ans; then
-      echo "[bootstrap] 无法读取输入，请在交互式终端运行（例如 docker run -it ... 或在本地直接 bash 运行）。"
-      exit 1
+# ============================================================================
+# 交互式配置（仅在非交互模式下跳过）
+# ============================================================================
+if [ "$NON_INTERACTIVE" != "1" ]; then
+  if ! ask_yes "是否继续安装？"; then
+    warn "安装已取消"
+    exit 0
+  fi
+
+  echo ""
+  info "你可以自定义一些选项，或直接回车使用默认值"
+  echo ""
+
+  # 仅询问关键问题
+  if [ "$DISTRO" = "arch" ]; then
+    if ask_yes "是否优化 Arch 镜像源？（推荐中国大陆用户）"; then
+      RUN_MIRRORS=1
+    else
+      RUN_MIRRORS=0
     fi
-    case "$ans" in
-    y | Y)
-      run_step "$step"
-      break
-      ;;
-    s | S)
-      echo "[skip] $step"
-      break
-      ;;
-    e | E)
-      echo "退出"
-      exit 0
-      ;;
-    *) echo "请输入 y / s / e" ;;
-    esac
-  done
-}
+  fi
 
+  echo ""
+
+  if ask_yes "是否设置 zsh 为默认 shell？"; then
+    SET_DEFAULT_SHELL=1
+  else
+    SET_DEFAULT_SHELL=0
+  fi
+
+  echo ""
+
+  if ask_yes "是否同步 Neovim 插件？（首次安装推荐，耗时较长）"; then
+    INSTALL_NVIM_PLUGINS=1
+  else
+    INSTALL_NVIM_PLUGINS=0
+  fi
+
+  echo ""
+
+  # 可选功能
+  info "可选功能（通常不需要）："
+  echo ""
+
+  if ask_no "是否安装 mihomo 代理？"; then
+    MIHOMO_SETUP=1
+  fi
+
+  if ask_no "是否安装 fcitx5 输入法？"; then
+    FCITX5_SETUP=1
+  fi
+
+  # 导出配置
+  export RUN_MIRRORS SET_DEFAULT_SHELL INSTALL_NVIM_PLUGINS
+  export MIHOMO_SETUP FCITX5_SETUP
+else
+  info "使用非交互模式，将使用默认配置"
+fi
+
+# ============================================================================
+# 执行安装步骤
+# ============================================================================
+separator
+echo ""
+
+# 定义要执行的步骤
+STEPS="packages dotfiles secrets shell plugins"
+
+if [ "$MIHOMO_SETUP" = "1" ]; then
+  STEPS="$STEPS mihomo"
+fi
+
+if [ "$FCITX5_SETUP" = "1" ]; then
+  STEPS="$STEPS fcitx5"
+fi
+
+STEPS="$STEPS fonts"
+
+# 计算总步骤数
+TOTAL_STEPS=$(echo $STEPS | wc -w)
+CURRENT_STEP=0
+
+# 执行每个步骤
 for s in $STEPS; do
-  confirm_and_run "$s"
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+
+  case "$s" in
+    packages)
+      step "[$CURRENT_STEP/$TOTAL_STEPS] ${ICON_PACKAGE} 安装系统软件包"
+      if [ "$DISTRO" = "arch" ]; then
+        bash "$SCRIPT_DIR/steps/pacman-packages.sh"
+      else
+        bash "$SCRIPT_DIR/steps/apt-packages.sh"
+      fi
+      ;;
+
+    dotfiles)
+      step "[$CURRENT_STEP/$TOTAL_STEPS] ${ICON_GEAR} 部署 Dotfiles"
+      bash "$SCRIPT_DIR/steps/dotfiles-checkout.sh"
+      ;;
+
+    secrets)
+      step "[$CURRENT_STEP/$TOTAL_STEPS] ${ICON_LOCK} 创建密钥文件"
+      bash "$SCRIPT_DIR/steps/secrets.sh"
+      ;;
+
+    shell)
+      step "[$CURRENT_STEP/$TOTAL_STEPS] ${ICON_GEAR} 设置默认 Shell"
+      bash "$SCRIPT_DIR/steps/shell-default.sh"
+      ;;
+
+    plugins)
+      step "[$CURRENT_STEP/$TOTAL_STEPS] ${ICON_PLUGIN} 安装插件管理器"
+      bash "$SCRIPT_DIR/steps/plugins.sh"
+      ;;
+
+    mihomo)
+      step "[$CURRENT_STEP/$TOTAL_STEPS] ${ICON_ROCKET} 配置 Mihomo"
+      if [ "$DISTRO" = "arch" ]; then
+        bash "$SCRIPT_DIR/steps/mihomo-pacman.sh"
+      else
+        bash "$SCRIPT_DIR/steps/mihomo-apt.sh"
+      fi
+      ;;
+
+    fcitx5)
+      step "[$CURRENT_STEP/$TOTAL_STEPS] ${ICON_FONT} 安装 Fcitx5"
+      if [ "$DISTRO" = "arch" ]; then
+        bash "$SCRIPT_DIR/steps/fcitx5-rime-pacman.sh"
+      else
+        bash "$SCRIPT_DIR/steps/fcitx5-rime-apt.sh"
+      fi
+      ;;
+
+    fonts)
+      step "[$CURRENT_STEP/$TOTAL_STEPS] ${ICON_FONT} 安装字体"
+      if [ "$DISTRO" = "arch" ]; then
+        bash "$SCRIPT_DIR/steps/fonts-arch.sh"
+      else
+        bash "$SCRIPT_DIR/steps/fonts-apt.sh"
+      fi
+      ;;
+  esac
+
+  echo ""
 done
+
+# ============================================================================
+# 完成
+# ============================================================================
+finish_banner
+
+success "所有步骤已完成！"
+echo ""
+info "后续步骤："
+echo "   1. 重新登录以应用 shell 更改"
+echo "   2. 首次启动 tmux 时按 ${BRIGHT_WHITE}Ctrl+b I${RESET} 安装插件"
+echo "   3. 编辑 ${BRIGHT_WHITE}~/.config/zsh/env.d/90-secrets.zsh${RESET} 添加密钥"
+echo ""
+
+if [ "$MIHOMO_SETUP" = "1" ]; then
+  info "Mihomo 提醒："
+  echo "   - 编辑 ${BRIGHT_WHITE}~/.config/mihomo/config.yaml${RESET} 配置订阅"
+  echo "   - 运行 ${BRIGHT_WHITE}systemctl --user status mihomo${RESET} 检查状态"
+  echo ""
+fi
+
+if [ "$FCITX5_SETUP" = "1" ]; then
+  info "Fcitx5 提醒："
+  echo "   - 重新登录后在输入法配置中添加 Rime"
+  echo "   - 如需更多输入法方案，请访问 rime-ice 项目"
+  echo ""
+fi
+
+info "管理 dotfiles："
+echo "   ${BRIGHT_CYAN}dotfiles status${RESET}          查看状态"
+echo "   ${BRIGHT_CYAN}dotfiles add <file>${RESET}      添加文件"
+echo "   ${BRIGHT_CYAN}dotfiles commit -m \"msg\"${RESET}  提交更改"
+echo "   ${BRIGHT_CYAN}dotfiles push${RESET}             推送到远程"
+echo ""
+
+success "祝你使用愉快！${ICON_ROCKET}"
+echo ""
