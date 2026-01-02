@@ -2,9 +2,11 @@
 # 公共变量与工具函数（避免重复与耦合）
 set -euo pipefail
 
-# 加载 UI 函数库
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/ui.sh"
+# 加载 UI 函数库（如果还没加载）
+if ! declare -f info >/dev/null 2>&1; then
+  LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  source "$LIB_DIR/ui.sh"
+fi
 
 # ============================================================================
 # 默认环境变量（可被外部 export 覆盖）

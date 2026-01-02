@@ -9,3 +9,5 @@
 	helper = /usr/lib/git-core/git-credential-libsecret
 [init]
 	defaultBranch = main
+[core]
+	commentChar = ";"
