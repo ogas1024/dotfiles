@@ -19,6 +19,11 @@ alias ff="fastfetch"  # 快速显示 fastfetch
 alias bw="flatpak run --command=bw com.bitwarden.desktop" # bitwarden-cli
 alias vim="nvim"
 
+# 只有在 macOS 下，且安装了 7zz 时，才建立这个别名
+if [[ "$(uname -s)" == "Darwin" ]] && command -v 7zz >/dev/null 2>&1; then
+    alias 7z='7zz'
+fi
+
 alias dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME' # 使用 git bare repo 管理 dotfiles
 
 # Zsh 启动模式快捷命令：

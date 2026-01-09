@@ -2,6 +2,7 @@
 .config/zsh/secrets.zsh
 .config/zsh/secrets.d/
 .config/zsh/.zcompdump*
+.config/nvim/lazy-lock.json
 
 # Backups
 *.bak
@@ -12,3 +13,7 @@
 
 # Yazi conflict files
 *.toml-*
+.config/git/config.local
+.config/zsh/.zsh_history
+.config/zsh/.zsh_sessions
+.config/zsh/.zcompdump

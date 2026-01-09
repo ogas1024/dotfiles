@@ -5,8 +5,9 @@
   v4 = true
 [http]
 	version = HTTP/1.1
-[credential]
-	helper = /usr/lib/git-core/git-credential-libsecret
+# [credential]
+[include]
+    path = config.local
 [init]
 	defaultBranch = main
 [core]

@@ -23,8 +23,10 @@ fi
 # 说明：
 # - mise 负责按目录切换开发语言/工具链版本；
 # - 这里调用 `mise activate zsh` 注入 shim 与补全。
+# 动态查找 mise 命令，兼容 Linux (/usr/bin) 和 macOS (/opt/homebrew/bin)
 if command -v mise >/dev/null 2>&1; then
-  eval "$(/usr/bin/mise activate zsh)"
+  # 使用找到的 mise 路径进行初始化
+  eval "$($(command -v mise) activate zsh)"
 fi
 
 # ------------------- pnpm -------------------
